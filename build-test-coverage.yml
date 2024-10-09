@@ -1,0 +1,55 @@
+name: Build, Test, and Coverage
+on: [push, pull_request]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y autoconf automake libtool gcc make libssl-dev libcap-ng-dev python3-pip lcov
+          sudo pip3 install pyelftools
+
+      - name: Configure
+        run: |
+          ./boot.sh
+          ./configure --enable-Werror --enable-coverage
+
+      - name: Build
+        run: make -j4
+
+      - name: Run tests
+        run: make check TESTSUITEFLAGS=-j4
+
+      - name: Run system tests
+        run: |
+          sudo adduser $(id -un) kvm
+          sudo chown $(id -un) /dev/kvm
+          make check-system-userspace
+          sudo make check-kernel
+
+      - name: Generate coverage report
+        run: |
+          lcov --capture --directory . --output-file coverage.info
+          lcov --remove coverage.info '/usr/*' --output-file coverage.info
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage.info
+          flags: unittests
+          name: codecov-umbrella
+          fail_ci_if_error: true
+
+      - name: Upload test logs
+        if: failure()
+        uses: actions/upload-artifact@v2
+        with:
+          name: test-logs
+          path: |
+            tests/*.log
+            tests/system-kvm-*.log
